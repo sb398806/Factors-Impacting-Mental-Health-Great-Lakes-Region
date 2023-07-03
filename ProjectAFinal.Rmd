@@ -1,0 +1,664 @@
+---
+title: "Factors Impacting Mental Health in the Great Lakes Region"
+subtitle: "Using CHR-2022"
+author: "Samantha Baker"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    highlight: kate
+    number_sections: yes
+    code_folding: show
+    code_download: TRUE
+  html_document:
+    df_print: paged
+---
+
+# Preliminaries
+
+## My Packages
+
+```{r, message = FALSE, cache = FALSE}
+library(knitr)
+library(rmdformats)
+
+options(max.print="150"); 
+opts_chunk$set(comment=NA); 
+opts_knit$set(width=75)
+```
+
+```{r, message = FALSE}
+library(janitor) 
+library(knitr) 
+suppressWarnings(library(kableExtra))
+library(kableExtra)
+library(gt)
+library(broom)
+library(equatiomatic)
+library(naniar)
+library(patchwork)
+library(ggrepel)
+library(tidyverse)
+```
+
+## Data Ingest
+
+```{r, message = FALSE}
+chr_2022_raw <- read_csv("analytic_data2022.csv", skip = 1, guess_max = 4000,
+                         show_col_types = FALSE)
+```
+
+# Data Development
+
+## Selecting My Data
+
+I filtered the raw data to include only counties from the following states: Ohio, Indiana, Michigan, and Pennsylvania (330 counties total). I selected nine variables to include in my `chr_2022` data set including: `fipscode`, `county`, `state`, `county_ranked` and five additional variables that I renamed with more meaningful labels. These variables include my **outcome variable**, `poor_mental_health` (`v042_rawvalue`), `water_violations` (`v124_rawvalue`), `food_environment` (`v133_rawvalue`), `social_associations` (`v140_rawvalue`), and `some_college` (`v069_rawvalue`). I converted the `some_college` values to percentages using the `mutate` function.
+
+```{r}
+chr_2022 <- chr_2022_raw |>
+  filter(county_ranked==1) |>
+  filter(state=="OH" | state=="IN" | state=="PA" | state=="MI") |>
+  select(fipscode, county, state, county_ranked, 
+         v042_rawvalue, v133_rawvalue, v140_rawvalue, 
+         v124_rawvalue, v069_rawvalue) |>
+  rename (poor_mental_health = v042_rawvalue, 
+          water_violations = v124_rawvalue, 
+          food_environment = v133_rawvalue, 
+          social_associations = v140_rawvalue,
+          some_college = v069_rawvalue)  |>
+   mutate (some_college = some_college*100)
+```
+
+## Factoring & Creating Binary Categorical Variable
+
+I used the `mutate` function to convert `state` from a character variable to a factor and to convert `water_violations` from a double-precision numeric variable to a factor. I used the `fct_recode` function to recode the `water_violations` values from "1" and "0" to "Yes" and "No", respectively.
+
+```{r}
+chr_2022 <- chr_2022 |>
+  mutate (state=factor(state), 
+          water_violations= fct_recode(factor(water_violations), "Yes"="1", 
+                                       "No"="0"))
+```
+
+## Creating Multi-Category Variable
+
+I used the `mutate` function to categorize the `some_college` variable into five levels, creating the `some_college_cat` variable:
+
+1.  `some_college` rate below 45%,
+2.  45% up to but not including 55%,
+3.  55% up to but not including 65%,
+4.  65% up to but not including 75%, and
+5.  `some_college` rate of 75% or more
+
+```{r}
+chr_2022 <- chr_2022 |>
+    mutate(some_college_cat = case_when(
+        some_college < 45 ~ "1_lowest",
+        some_college < 55 ~ "2_low",
+        some_college < 65 ~ "3_middle",
+        some_college < 75 ~ "4_high",
+        TRUE ~ "5_highest"),
+        some_college_cat = factor(some_college_cat)) |>
+  relocate(county_ranked, .after = last_col()) 
+```
+
+## Three Important Checks
+
+I used the `miss_var_summary` function to check that my five variables have data for at least 75% of the counties in each state within the `chr_2022` data set. Only `food_environment` has missing data.
+
+```{r}
+chr_2022 |> 
+    miss_var_summary()|> 
+   kbl(digits = 2) |> kable_paper()
+```
+
+I used the `favstats` function to determine which states were missing data for `food_environment.` Indiana has two missing values and Michigan has one missing value for this variable.
+
+```{r, message = FALSE}
+mosaic::favstats(food_environment ~ state, data = chr_2022) |>
+    select(state, n, missing) |>
+    mutate(pct_available = 100*(n - missing)/n) |>
+    kbl(digits = 2) |> kable_paper()
+```
+
+I used the `summarize` function to check that each quantitative variable (`poor_mental_health`, `food_environment`, and `social_associations`) has at least 15 distinct values.
+
+```{r}
+chr_2022 |> 
+    summarize(across(poor_mental_health:social_associations, 
+                     ~ n_distinct(.))) |> 
+    kbl(digits = 2) |> kable_paper()
+```
+
+I used the `tabyl` function to check that each level of `water_violations` and `some_college_cat` includes at least 10 counties.
+
+```{r}
+chr_2022 |> tabyl(water_violations)|> 
+    kbl(digits = 2) |> kable_paper()
+
+chr_2022 |> tabyl(some_college_cat)|> 
+    kbl(digits = 2) |> kable_paper()
+```
+
+# My Analytic Tibble
+
+## Printing My Tibble
+
+Below is my final `chr_2022` tibble.
+
+```{r}
+chr_2022
+```
+
+## Summarizing my Tibble
+
+Below are the results of using the `Hmisc::describe` function on `chr_2022`.
+
+```{r}
+Hmisc::describe(chr_2022) 
+```
+
+## Saving the Tibble
+
+```{r}
+saveRDS(chr_2022, file = "chr_2022_Samantha_Baker.RDS")
+```
+
+# Codebook
+
+## Table of States with County Counts
+
+The states included in my project include Ohio, Indiana, Michigan, and Pennsylvania. Together, these states comprise 330 counties - 88 in Ohio, 92 in Indiana, 83 in Michigan, and 67 in Pennsylvania. I selected these states for their common geography and shared cultural identity as Rust Belt states in the Great Lakes region of the United States.
+
+```{r}
+chr_2022 |> tabyl(state) |> adorn_pct_formatting() |> adorn_totals() |> 
+  kbl(digits = 2) |> kable_paper()
+```
+
+## Table of Variables, Descriptions, and Roles
+
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| Variable              | v Code  | Description                                                                       | Analytic Role               | NAs     |
++=======================+=========+:=================================================================================:+=============================+=========+
+| `fipscode`            | --      | FIPS code: 5-digit identifying code for state & county                            | ID                          | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `county`              | --      | County Name (my data includes **330** counties)                                   | --                          | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `state`               | --      | My **four** states are OH, IN, MI, & PA                                           | state                       | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `poor_mental_health`  | v042    | Average number of mentally unhealthy days reported in last 30 days (age adjusted) | outcome                     | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `food_environment`    | v133    | Index of factors that contribute to healthy food environment, rank                | quantitative predictor      | 3       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `social_associations` | v140    | Number of membership associations per 10,000 population                           | quantitative predictor      | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `water_violations`    | v124    | **2 levels:**                                                                     | binary predictor            | 0       |
+|                       |         |                                                                                   |                             |         |
+|                       |         | **Yes** = health-related drinking water violation present                         |                             |         |
+|                       |         |                                                                                   |                             |         |
+|                       |         | **No** = no violation present                                                     |                             |         |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `some_college`        | v069    | Adults, 25-44 with some post-secondary education, %                               | --                          | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `some_college_cat`    | v069    | **5 levels:**                                                                     | multi-categorical predictor | 0       |
+|                       |         |                                                                                   |                             |         |
+|                       |         | Lowest (below 45%)                                                                |                             |         |
+|                       |         |                                                                                   |                             |         |
+|                       |         | Low (between 45% & 55%)                                                           |                             |         |
+|                       |         |                                                                                   |                             |         |
+|                       |         | Middle (between 55% & 65%)                                                        |                             |         |
+|                       |         |                                                                                   |                             |         |
+|                       |         | High (between 65% & 75%)                                                          |                             |         |
+|                       |         |                                                                                   |                             |         |
+|                       |         | Highest (above 75%)                                                               |                             |         |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+| `county_ranked`       | --      | 1 for all counties in my tibble                                                   | --                          | 0       |
++-----------------------+---------+-----------------------------------------------------------------------------------+-----------------------------+---------+
+
+## Details on my Variables from CHR
+
+-   `poor_mental_health` was originally variable `v042_rawvalue`, and is listed in the Quality of Life subcategory under Health Outcomes at County Health Rankings. It describes the average number of days within the last 30 days that respondents reported that their mental health was poor. It is based on data from the Behavioral Risk Factor Surveillance System from 2019. This is my **outcome** variable.
+
+-   `food_environment` was originally variable `v133_rawvalue`, and is listed in the Diet and Exercise subcategory under Health Factors - Health Behaviors at County Health Rankings. It represents an index of factors that generally indicate a healthy food environment and is based on data from the 2019 USDA Food Environment Atlas, Map the Meal Gap from Feeding America. The Index ranges from 0 (worst food environment) to 10 (best food environment), giving equal weight to two different indicators including: (1) the percentage of a county's population that lives at or below 200 percent of the federal poverty line (low income) and does not live within either a 1-mile radius of a grocery store (for non-rural counties) or a 10-mile radius of a grocery store (for rural counties); and (2) an estimate of the percentage of a county's population lacking access to reliable sources of food during the last year.
+
+-   `social_associations` was originally variable `v140_rawvalue`, and is listed in the Family and Social Support subcategory under Health Factors - Social & Economic Factors at County Health Rankings. It describes the rate of membership associations per 10,000 residents in a county, and is based on data from the County Business Partners from 2019. Membership associations include the following types of organizations: civic, political, labor, religious, sports, business and professional, as well as bowling centers, fitness facilities, and golf clubs.
+
+-   `water violations` was originally variable `v124_rawvalue`, and is listed in the Environmental Quality subcategory under Health Factors - Physical Environment at County Health Rankings. It is based on the 2020 Safe Drinking Water Information System from the EPA. As an indicator, it represents the presence or absence of at least one drinking water violation considered to be health-related within a county.
+
+-   `some_college` was originally variable `v069_rawvalue`, which I multiplied by 100 to convert from a proportion to a percentage. It is listed in the Education subcategory under Health Factors - Social & Economic Factors at County Health Rankings. It describes the proportion of the county's adult population, ages 25-44, that have completed at least some post-secondary education (includes those who completed a degree and those who did not) and is based on the American Community Survey 2016 - 2020 5-Year Estimates.
+
+# Biggest Challenge
+
+The most challenging aspects of completing my project proposal were: (1) figuring out how to develop my multicategorical variable and (2) balancing the project work with homework for other classes, my job, and personal life. I attended the TA office hours and received assistance on developing variable 5 into multiple categories. That was very helpful and Shiying Liu has been an excellent resource so far this semester. As for balancing life/work/school, I'm figuring out what schedule works best for me and I'm thankful for the support of my husband, family, and supervisor.
+
+# Analysis 1
+
+## The Variables
+
+For Analysis 1, my outcome is `poor_mental_health` and my predictor is the `food_environment` index. `poor_mental_health` describes the average number of days within the last 30 days that county residents reported that their mental health was poor. `food_environment` is an index of factors that generally indicate a healthy food environment with rankings from 0 - 10 (0 = worst, 10 = best). The index gives equal weight to two indicators: (1) the percentage of a county's population living at or below 200 percent of the federal poverty line (low income) and not living within either a 1-mile radius of a grocery store (for non-rural counties) or a 10-mile radius of a grocery store (for rural counties); and (2) an estimate of the percentage of a county's population lacking access to reliable sources of food during the last year.
+
+I created the `chr_2022_A1` tibble for this analysis by filtering for counties with complete data for `food_environment` and selecting my outcome and predictor variables (`poor_mental_health` and `food_environment`, respectively). My data set includes the following states: Ohio, Indiana, Michigan, and Pennsylvania. After filtering for missing data, I ended up with 327 counties, down from 330 in my original tibble. Indiana had two missing values and Michigan had one missing value for `food_environment`. My `chr_2022_A1` tibble includes: 88 counties in OH, 90 counties in IN, 82 counties in MI, and 67 counties in PA. Cuyahoga County, OH, had a `food_environment` ranking of 7.8 and a value of 5.04 days for `poor_mental_health`.
+
+```{r}
+chr_2022_A1 <- chr_2022 |>
+  filter(complete.cases(food_environment))|>
+  select(fipscode, county, state, county_ranked, poor_mental_health, 
+         food_environment)|>
+  relocate(county_ranked, .after = last_col())
+
+chr_2022_A1 |>
+  filter(county=="Cuyahoga County")
+```
+
+## Research Question
+
+What is the nature of the association between a county's food environment index and the mental health of its residents in 327 counties in OH, IN, MI,and PA?
+
+## Data Visualization
+
+I used `ggplot` to create a scatterplot displaying the relationship between average poor mental health days and a county's food environment in my sample of 327 counties in OH, IN, MI, and PA. I included both straight-line and loess smooth models on the scatterplot using the `geom_smooth` function. In general, there is a negative relationship between the two variables such that a higher food environment index ranking is associated with a decrease in the number of poor mental health days reported within the last 30 days. There are some unusual outliers: counties with higher food environment rankings (between 8.5 - 9) also reporting over 5.5 poor mental days on average. Most county food environment rankings fall between 7.4 - 8.6, our interquartile range. A linear model appears to represent the association between these two variables with moderate strength.
+
+```{r, message=FALSE}
+ggplot(data = chr_2022_A1, aes(x = food_environment, y = poor_mental_health)) +
+  geom_point(color="dodgerblue", size = 2, alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, col = "maroon", size=1.2, 
+              linetype="dashed") +
+  geom_smooth(method = "loess", se = TRUE, formula = y~x, col = "navyblue", 
+              size=1.2)+
+  labs(title = "Food Environment - Mental Health Relationship in 327 Great Lakes Counties", 
+  subtitle = "with fitted straight line regression model & non-linear loess smooth function", 
+  y = "Avg Poor Mental Health Days, Past 30 Days", 
+  x="Food Environment Index, from worst (0) to best (10)")
+```
+
+## Transformation Assessment
+
+I assessed three potential transformations of my outcome variable, `poor_mental_health` days: (1) the logarithm, (2) the inverse, and (3) the square. I created normal Q-Q plots for all three transformations and each appeared to roughly follow the straight line with some light negative skew appearing on plots of my original data, the logarithm, and the square, and light positive skew appearing on the inverse plot. This suggests that a normal distribution is a good approximation for my `chr_2022_A1` data set. The plot of my squared outcome variable provided the slightest improvement, appearing to lessen some of the skew in both directions. I've included that plot in my analysis as the most promising of the three transformations. I decided to continue Analysis 1 with my original data, opting not to use a transformation. There were no meaningful differences between the plot of my original data and any of the transformed plots, suggesting none would provide a better fit for the linear model. I used the `ggplot` function to create the two scatterplots below, displaying my original data and my squared outcome variable for comparison.
+
+```{r, message = FALSE}
+p1 <- ggplot(chr_2022_A1, aes(x = food_environment, y = poor_mental_health)) +
+  geom_point(color="dodgerblue", size = 2, alpha = 0.5) +
+    theme(aspect.ratio = 1) +
+
+  geom_smooth(method = "lm", se = FALSE, col = "maroon", linetype="dashed") +
+  geom_smooth(method = "loess", se = TRUE, formula = y~x, col = "navyblue")+
+  labs(title = "Original Scatterplot", y = "Avg Poor Mental Health Days", 
+       x="Food Environment Index Rankings")
+
+
+p2 <- ggplot(chr_2022_A1, aes(x = food_environment, y = poor_mental_health^2)) +
+    geom_point(color="dodgerblue", size = 2, alpha = 0.5) +
+    theme(aspect.ratio = 1) +
+
+    geom_smooth(method = "loess", se = TRUE, 
+                formula = y ~ x, col = "navyblue") +
+    geom_smooth(method = "lm", se = FALSE, 
+                formula = y ~ x, col = "maroon", linetype = "dashed") +
+    labs(title = "Y^2 vs. X", y = "Avg Poor Mental Health Days, Squared", 
+         x="Food Environment Index Rankings")
+
+p1 + p2 
+```
+
+## The Fitted Model
+
+### The Prediction Equation
+
+The straight line model for these data fitted by least squares is **`poor_mental_health` = 7.76 - .33`food_environment`***.* For every additional increase in the food environment index ranking (between 0 - 10), we would expect a .33 decrease in the average number of poor mental health days reported by county residents.
+
+The estimated intercept for `model1` is 7.76. This is the predicted average number of poor mental health days over the past 30 days if residents lived in a county with the worst food environment index ranking (0). The estimated slope of `model1` is -.33. This is the predicted change in poor mental health days associated with an increase of one in the food environment index. `model1` predicts that the number of poor mental health days decreases by 1/3 of a day with each increase of one in the food environment index ranking.
+
+```{r}
+model1 <- lm(poor_mental_health ~ food_environment, data = chr_2022_A1)
+extract_eq(model1, use_coefs=TRUE, coef_digits=2)
+```
+
+### The Model Coefficients
+
+My 90% confidence interval for the intercept of `model1` ranges from 7.45 - 8.06. I am 90% confident that the true intercept is between 7.45 - 8.06 poor mental health days. My 90% confidence interval for the slope of `model1` ranges from -.37 to -.29. I am 90% confident that the true slope for `food_environment` is between -.37 and -.29.
+
+```{r}
+tidy(model1, conf.int = TRUE, conf.level = 0.90) |> 
+  kbl(digits = 2) |> kable_paper()
+```
+
+### Summaries of Model Fit
+
+The R-squared value for `model1` is .369. This is the proportion of the variation in my outcome variable, `poor_mental_health`, that has been accounted for by my regression model. The model has accounted for just under 37% of the variation in the average number of poor mental health days using `food_environment` as a predictor variable. This indicates an improvement over projecting the mean for all counties (5.212 poor mental health days).
+
+The residual standard error (sigma) for `model1` is .29 on 325 degrees of freedom. This estimates the standard deviation of the prediction errors made by the model if my assumptions hold. I expect roughly 95% of my residuals to fall between -2(.29) and +2(.29), or roughly, -.58 to .58. `model1` was fit using 327 counties. The Pearson correlation of `food_environment` and `poor_mental_health` was -.607, indicating that the linear relationship in `model1` between my outcome and predictor variables is strong.
+
+```{r}
+glance(model1) |> select(r.squared:df, df.residual, nobs) |>
+  kbl(digits = c(3, 3, 3, 2, 3, 0, 0, 0)) |> kable_paper()
+
+chr_2022_A1 |> select(poor_mental_health, food_environment) |> cor()  
+```
+
+## Residual Analysis
+
+I used `ggplot` to create two residual plots displaying: (1) residuals vs fitted values for `model1` and (2) a normal Q-Q plot for `model1`'s 327 residuals. As we move from left to right on the first residual plot, no patterns emerge that would suggest non-linearity or issues with homoscedasticity. The regression residuals show similar variance across the fitted values for `poor_mental_health`. The normal Q-Q plot of the residuals reveals a few values that are a bit high and a few more values that are a bit low. However, the majority of them are fairly close to a normal distribution. The linearity, equal variance, and normality assumptions appear to hold for `model1`.
+
+`model1`'s prediction for Cuyahoga County, OH, was an average of 5.192 days for `poor_mental_health`. The actual value of `poor_mental_health` for Cuyahoga County was an average of 5.042 days. This is an error of -.15, meaning that, on average, residents of Cuyahoga County reported .15 fewer days of poor mental health than the model predicted. This is an actual difference of about 3.6 hours.
+
+The two counties where `model1` was least successful in predicting `poor_mental_health` are Hamilton County, IN, and Holmes County, OH, with residual errors of -.879 and 1.092, respectively. For Hamilton County, the model predicted that residents reported almost one full additional day, on average, of poor mental health in the last 30 days than was actually reported (3.95 actual, 4.83 predicted) and for Holmes County, the model predicted that residents reported 1+ fewer poor mental health days, on average, than were actually reported (6.021 actual, 4.292 predicted).
+
+```{r}
+model1_aug <- augment(model1, data = chr_2022_A1)
+
+p1<- ggplot(model1_aug, aes(x = .fitted, y = .resid)) +
+  geom_point() + 
+  geom_point(data = model1_aug |> 
+               slice_max(abs(.resid), n = 2),
+             col = "red", size = 2) +
+  geom_text_repel(data = model1_aug |> 
+               slice_max(abs(.resid), n = 2),
+               aes(label = fipscode), col = "red") +
+
+  geom_abline(intercept = 0, slope = 0, lty = "dashed") +
+  geom_smooth(method = "loess", formula = y ~ x, se = F) +
+  labs(title = "Model1: Residuals vs. Fitted Values",
+       caption = "2 largest |residuals| highlighted in red.",
+       x = "Fitted Total Poor Mental Health Days", y = "Residual") 
+
+p2 <- ggplot(model1_aug, aes(sample = .resid)) +
+    geom_qq(col = "black") + 
+    geom_qq_line(col = "blue") +
+    labs(title = "Normal Q-Q: 327 model1 Residuals")
+
+p1+p2
+
+
+model1_aug |> select(fipscode:.resid) |> 
+  filter(county == "Cuyahoga County") |>
+  kbl(digits = 3) |> kable_paper()
+
+model1_aug |> select(fipscode:.resid) |> 
+  filter(fipscode == 39075| fipscode==18057) |>
+  kbl(digits = 3) |> kable_paper()
+```
+
+## Conclusions and Limitations
+
+In Analysis 1, I examined the nature of the association between a county's food environment index and the mental health of its residents in 327 counties in Ohio, Indiana, Michigan, and Pennsylvania. Based on my analysis, it's reasonable to conclude that a strong relationship exists between a county's food environment and the mental health of its residents for states in the Great Lakes/ Rust Belt regions of the United States. The Food Environment Index measure accounts for the income of county residents as well as their proximity to sources of healthy food (i.e., grocery stores). It seems logical that low-income residents encountering barriers to accessing healthy foods would also experience higher levels of poor mental health days than those living in more affluent counties with more robust food options. The scatterplots and regression model I built in this analysis support these conclusions. A clear negative linear relationship exists between the two variables such that higher food environment index rankings are associated with fewer reported poor mental health days, on average. The linear regression model I fit accounted for nearly 37 percent of the variation in the average number of poor mental health days reported by county residents. A Pearson correlation coefficient was computed to assess the linear relationship between a county's poor mental health days and its food environment index. There was a negative correlation between the two variables, r(325) = -.61.
+
+While I'm able to establish that an association between poor mental health and the food environment index exists, my analysis is limited in that it cannot determine whether, or to what extent, a county's food environment causes poor mental health in residents. It's entirely possible that some confounding variable (such as county population or tax revenue) is influencing my variables and may require further analysis. Another limitation is that most of the data points for `poor_mental_health` within my sample of 327 counties, fall within one day of each other. There might not be a lot of real world significance for people between an average of 4.5 days of poor mental health per month and an average of 5.5 days of poor mental health per month. Individual differences for county residents might be more significant but my data does not capture that. Another limitation is that the values for my `poor_mental_health` variable were based on both self-report data as well as values created using statistical modeling to generate more stable estimates for counties with smaller populations and/or lower response rates. Self-report data cannot be verified with medical records and model-based estimates might not accurately reflect the experiences of county residents if the model's assumptions do not actually hold for counties where estimates were imputed. Finally, my selected states are not necessarily a representative sample of the entire US. Counties in every state experience poor mental health, poverty, and barriers to accessing healthy foods in ways that are unique to the culture and geography of their state and region. While I think it's likely that similar relationships between poor mental health and the food environment of a county exist for states outside of the Great Lakes/ Rust Belt region, further analyses are needed to determine how these relationships manifest in other regions of the country.
+
+# Analysis 2
+
+## The Variables
+
+For Analysis 2, my outcome is `poor_mental_health` and my predictor is `water_violations`. `poor_mental_health` describes the average number of days within the last 30 days that county residents reported that their mental health was poor. `water_violations` is an indicator representing the presence or absence of at least one health-related drinking water violation during the last year for any of the community water systems within a particular county. This binary variable includes two levels: "Yes" (drinking water violation present) and "No" (drinking water violation absent - **baseline category**).
+
+I created the `chr_2022_A2` tibble for this analysis by filtering for counties with complete data and selecting my outcome and predictor variables (`poor_mental_health` and `water_violations`, respectively). My data set includes the following states: Ohio, Indiana, Michigan, and Pennsylvania. Neither of my variables had missing data so I maintained my sample of 330 counties from my original tibble. My `chr_2022_A2` tibble includes: 88 counties in OH, 92 counties in IN, 83 counties in MI, and 67 counties in PA. Cuyahoga County, OH, did not have any health-related drinking water violations ("No" value for `water_violations`) and had a value of 5.04 days for `poor_mental_health`.
+
+```{r}
+chr_2022_A2 <- chr_2022 |>
+  filter(complete.cases(water_violations))|>
+  select(fipscode, county, state, county_ranked, poor_mental_health, 
+         water_violations) |>
+  relocate(county_ranked, .after = last_col())
+
+chr_2022_A2 |>
+  filter(county=="Cuyahoga County")
+```
+
+## Research Question
+
+Do counties with water violations show higher levels of poor mental health days in 330 counties in OH, IN, MI, and PA?
+
+## Data Visualization
+
+I used `ggplot` to create a boxplot with violin to display my outcome, `poor_mental_health`, broken down by each level of my binary predictor variable, `water_violations`, for my sample of 330 counties in OH, IN, MI, and PA. On average, counties with water violations (n = 106) reported just over 5 poor mental health days within the last 30 days (mean = 5.07). Interestingly, counties ***without*** water violations actually reported **more poor mental health days**, on average, than counties with water violations (mean = 5.28 days). The ranges and interquartile ranges for `poor_mental_health` were similar for counties within each category. There were a few outliers, one in the "no" water violation category, and four in the "yes" water violation category.
+
+As with Analysis 1, after assessing three potential transformations of the `poor_mental_health` outcome variable, I decided to continue my analysis with my original data, opting not to use a transformation as there were no meaningful differences between the plot of my original data and any of the transformation plots, suggesting none would provide a better fit for the linear model.
+
+```{r, message = FALSE}
+  ggplot(chr_2022_A2, aes(x = water_violations, y = poor_mental_health)) +
+    geom_violin() +
+    geom_boxplot(aes(fill = water_violations), width = 0.3, notch = TRUE) +
+    stat_summary(fun=median, geom="point", 
+                 fill="white", shape=21, size=2.5)+
+    scale_fill_viridis_d(alpha = 0.4) +
+    guides(fill = "none") + 
+    labs(title = "Poor Mental Health Days by County Water Violation Category", 
+         subtitle = "in 330 Great Lakes Counties (OH, IN, PA, MI)", 
+         x = "Water Violation Categories", 
+         y = "Avg Poor Mental Health Days, Past 30 Days") +
+  annotate("text", x="No", y=4, color="dodgerblue", fontface="bold", 
+           label="n = 106") +
+  annotate("text", x="Yes", y=6, color="dodgerblue", fontface="bold", 
+           label="n = 224")
+```
+
+## The Fitted Model
+
+### The Prediction Equation
+
+The linear regression model for these data is **`poor_mental_health` = 5.28 - .2`water_violations(Yes)`***.* If a county has a water violation present, we would expect a .2 decrease in the average number of poor mental health days reported by county residents.
+
+The estimated intercept for `model2` is 5.28. This is the predicted average number of poor mental health days over the past 30 days for residents of counties without health-related water violations over the last year. The estimated slope of `model2` is -.2. This is the predicted change in poor mental health days associated with the presence of a health-related water violation. `model2` predicts that the number of poor mental health days decreases by 1/5 of a day with the presence of at least one health-related water violation. "
+
+```{r}
+model2 <- lm(poor_mental_health ~ water_violations, data = chr_2022_A2)
+extract_eq(model2, use_coefs=TRUE, coef_digits=2)
+```
+
+### The Model Coefficients
+
+The samples for each level of my binary variable, `water_violations`, were unbalanced, with more than double the number of counties in the "yes" water violation category than the "no" water violation category. I used a Welch's t-test approach to generate my confidence interval. My 90% confidence interval for the difference in the mean number of poor mental health days, on average, between my two groups is [.13, .27] with the mean for the "no" water violation group at 5.28 poor mental health days and the mean for my "yes" water violation group at 5.07 poor mental health days.
+
+```{r}
+tt <- t.test(poor_mental_health ~ water_violations,
+       data = chr_2022_A2,
+       conf.level = 0.90,
+       alt = "two.sided")
+
+tidy(tt, conf.int = TRUE, conf = 0.90) |> 
+  kbl(digits = 2) |> kable_paper()
+```
+
+### Summaries of Model Fit
+
+The R-squared value for `model2` is .068. This is the proportion of the variation in my outcome variable, `poor_mental_health`, that has been accounted for by my regression model. The model has accounted for just under 7% of the variation in the average number of poor mental health days using `water_violations`. This indicates a very slight improvement over projecting the mean for all counties (5.212 poor mental health days).
+
+The residual standard error (sigma) for `model2` is .35 on 328 degrees of freedom. This estimates the standard deviation of the residuals made by the model if my assumptions hold. I expect roughly 95% of my residuals to fall between -2(.35) and +2(.35), or roughly, -.7 to .7. `model2` was fit using 330 counties.
+
+```{r}
+glance(model2) |> select(r.squared:df, df.residual, nobs) |>
+  kbl(digits = c(3, 3, 3, 2, 3, 0, 0, 0)) |> kable_paper()
+```
+
+## Prediction Analysis
+
+### Residual Plot
+
+I used `ggplot` to create a residual plot displaying `model2` residuals vs my categorical predictor, `water_violations`. The residuals in the "yes" water violation category appear to exhibit slightly more skew than those in the "no" water violation category suggesting that the values in the "no" water violation category are more normally distributed.
+
+```{r}
+model2_aug <- augment(model2, data = chr_2022_A2)
+
+p1<- ggplot(model2_aug, aes(x = water_violations, y = .resid)) +
+  geom_jitter() + 
+  geom_point(data = model2_aug |> 
+               slice_max(abs(.resid), n = 2),
+             col = "red", size = 2) +
+  geom_text_repel(data = model2_aug |> 
+               slice_max(abs(.resid), n = 2),
+               aes(label = fipscode), col = "red") +
+
+  geom_abline(intercept = 0, slope = 0, lty = "dashed") +
+  labs(title = "Model2: Residuals vs. Predictor",
+       caption = "2 largest |residuals| highlighted in red.",
+       x = "Water Violation Categories", y = "Residual") 
+
+p1
+```
+
+### Prediction for Cuyahoga County, OH
+
+`model2`'s prediction for Cuyahoga County, OH, was 5.28 days for `poor_mental_health`. The actual value of `poor_mental_health` for Cuyahoga County was 5.042 days. This is an error of -.24, meaning that, on average, residents of Cuyahoga County reported just under a 1/4 fewer days of poor mental health, on average, than the model predicted. This is an actual difference of less than 6 hours.
+
+```{r}
+model2_aug |> select(fipscode:.resid) |> 
+  filter(county == "Cuyahoga County") |>
+  kbl(digits = 3) |> kable_paper()
+```
+
+### My Two Least Successfully Fit Counties
+
+The two counties where `model2` was least successful in predicting `poor_mental_health` are Hamilton County, IN, and Delaware County, OH, with residual errors of -1.123 and -1.021, respectively. For both counties, the model predicted that residents reported just over one additional day, on average, of poor mental health in the last 30 days than was actually reported (Hamilton: 3.95 actual, 5.07 predicted; Holmes: 4.26 actual, 5.28 predicted).
+
+```{r}
+model2_aug |> select(fipscode:.resid) |> 
+  filter(fipscode == 39041| fipscode==18057) |>
+  kbl(digits = 3) |> kable_paper()
+```
+
+## Conclusions and Limitations
+
+In Analysis 2, I examined the nature of the relationship between a county's health-related water violation status and the mental health of its residents in 330 counties in Ohio, Indiana, Michigan, and Pennsylvania. I predicted that counties with health-related water violations present would show higher levels of poor mental health days than did counties without any health-related water violations. Based on my analysis, I actually observed the opposite. Counties with health-related water violations actually reported, on average, fewer poor mental health days than those counties without any health-related water violations (mean = 5.07 and 5.28, respectively). While the difference between the means is not very large, representing an actual difference in the means of .2 days (just under 5 hours), the result was surprising and statistically significant.
+
+One limitation of Analysis 2 was working with relatively small, and unbalanced, samples for each category of my binary variable, making my study design less powerful that it would be for a balanced design. Another limitation was my `water_violations` variable. This variable only represents the presence of at least one water violation within a county without taking into account the number or severity of the violations. Some health-related water violations can be remedied much quicker and result in less harm to county residents while others can take years to correct. It's also impossible to determine what portion of a county's population is impacted by the water violation using this variable. The `water_violations` variable was likely not the best predictor variable to examine the impact of a county's water quality on the mental health of county residents.
+
+# Analysis 3
+
+## The Variables
+
+For Analysis 3, my outcome is `poor_mental_health` and my predictor is the `food_environment` index after adjusting for the effect of the `state` variable. `poor_mental_health` describes the average number of days within the last 30 days that county residents reported that their mental health was poor. `food_environment` is an index of factors that generally indicate a healthy food environment with rankings from 0 - 10 (0 = worst, 10 = best). The index gives equal weight to two indicators: (1) the percentage of a county's population living at or below 200 percent of the federal poverty line (low income) and not living within either a 1-mile radius of a grocery store (for non-rural counties) or a 10-mile radius of a grocery store (for rural counties); and (2) an estimate of the percentage of a county's population lacking access to reliable sources of food during the last year. The `state` variable is the postal code abbreviation for four states in the Great Lakes/ Rust Belt region of the US including: Ohio, Indiana, Michigan, and Pennsylvania.
+
+I created the `chr_2022_A3` tibble for this analysis by filtering for counties with complete data for `food_environment` and selecting my outcome and predictor variables (`poor_mental_health` and `food_environment`, respectively). I used the `mutate` and `fct_relevel` functions to add the `state_f` variable to my tibble, ensuring that Ohio is used as my baseline state throughout the analysis. After filtering for missing data, I ended up with 327 counties, down from 330 in my original tibble. Indiana had two missing values and Michigan had one missing value for `food_environment`. My `chr_2022_A3` tibble includes: 88 counties in OH, 90 counties in IN, 82 counties in MI, and 67 counties in PA.
+
+Cuyahoga County, OH, had a `food_environment` ranking of 7.8 and a value of 5.04 days for `poor_mental_health`.
+
+```{r}
+chr_2022_A3 <- chr_2022 |>
+  filter(complete.cases(food_environment))|>
+  select(fipscode, county, state, county_ranked, 
+         poor_mental_health, food_environment) |>
+  mutate(state_f = fct_relevel(state, "OH", "IN", "MI", "PA")) |>
+  relocate(county_ranked, .after = last_col())
+
+chr_2022_A3 |> tabyl(state_f)
+
+chr_2022_A3 |>
+  filter(county=="Cuyahoga County")
+```
+
+## Research Question
+
+How well does a county's food environment index ranking predict poor mental health after accounting for differences between states?
+
+## Data Visualization
+
+I used `ggplot` and `facet_wrap` to create scatterplots displaying the relationship between poor mental health days and a county's food environment separated by state, for my sample of 327 counties in OH, IN, MI, and PA. For each state, there is a negative relationship between the two variables such that a higher food environment index ranking is associated with a decrease in the average number of poor mental health days reported within the last 30 days. I included both straight-line and loess smooth models on each plot using the `geom_smooth` function. We can observe some differences between the states with Indiana's straight-line model appearing to to have the shallowest slope while Pennsylvania's loess smooth model appears to be most impacted by its unusual outliers. Pennsylvania also has the fewest number of counties so perhaps outliers have a greater impact on that model than in other states in my data set. Pennsylvania counties exhibit the smallest range in their `food_environment` index ranking and include the only data point with a `food_environment` ranking over 9. In general, linear models appear to represent the association between these two variables with moderate strength.
+
+As with Analyses 1 and 2, after assessing three potential transformations of my `poor_mental_health` outcome variable, I decided to continue my analysis with my original data, opting not to use a transformation as there were no meaningful differences between the plot of my original data and any of the transformation plots, suggesting none would provide a better fit for the linear model.
+
+```{r, message = FALSE}
+names <- c('OH' = "OH (n = 88 counties)", 'IN' = "IN (n = 90 counties)", 
+           'MI' = "MI (n = 82 counties)", 'PA' = "PA (n = 67 counties)")
+
+ggplot(data = chr_2022_A3, aes(x = food_environment, y = poor_mental_health, 
+                               col = state_f)) +
+  geom_point(size = 2, alpha = 0.5) +
+  facet_wrap(~state_f, labeller = as_labeller(names))+
+  geom_smooth(method = "lm", se = FALSE, col = "maroon", size=1.2, 
+              linetype="dashed") +
+  guides(color="none")+
+  geom_smooth(method = "loess", se = TRUE, formula = y~x, col = "navyblue", 
+              size=1.2)+
+  labs(title = "Scatterplots of Poor Mental Health vs Food Environment Index by State", 
+  subtitle = "with fitted straight line regression model & non-linear loess smooth function", 
+  y = "Avg Poor Mental Health Days, Past 30 Days", x="Food Environment Index")
+```
+
+## The Fitted Model
+
+### The Prediction Equation
+
+The multiple linear regression model is **`poor_mental_health` = 7.48 - .28`food_environment` - .21`state_f(IN)` - .05`state_f(MI)` - .26`state_f(PA)`***.* For every additional increase in the food environment index ranking (between 0 - 10), we would expect a .28 decrease in the average number of poor mental health days reported by county residents in Ohio (my baseline state) with additional decreases for each state in `model3`. In Indiana, we would expect a .49 decrease in the average number of poor mental health days reported by county residents for every additional increase in the food environment index ranking (-.28 + -.21). For Michigan, we would expect a .33 decrease (-.28 + -.05) and for Pennsylvania, we would expect a .54 decrease (-.28 + -.26).
+
+The estimated intercept for `model3` is 7.48. This is the predicted average number of poor mental health days over the past 30 days for a residents of counties with the worst food environment index ranking (0) in my baseline state, Ohio. This is hypothetical as no county in my data set received a 0 ranking. Each additional parameter represents the decrease in `poor_mental_health` associated with that particular state when my `food_envrionment` variable is held constant.
+
+```{r}
+model3 <- lm(poor_mental_health ~ food_environment + state_f, 
+             data = chr_2022_A3)
+extract_eq(model3, use_coefs=TRUE, coef_digits=2, wrap = TRUE, 
+           terms_per_line = 3)
+```
+
+### The Model Coefficients
+
+My 90% confidence interval for the intercept of `model3` ranges from 7.17 - 7.79. I am 90% confident that the true intercept is between 7.17 - 7.79 poor mental health days. My 90% confidence interval for the partial regression slope of `food_environment` ranges from -.32 to -.24. My 90% confidence intervals for the partial regression slopes for the three other states in my data set include: (1)`state_fIN` (Indiana): range of -.28 to -.14, (2) `state_fMI` (Michigan): range of -.12 to .02, and (3) `state_fPA` (Pennsylvania): range of -.33 to -.18. I am 90% confident that the true partial regression slopes fall within those aforementioned ranges for each variable.
+
+```{r}
+tidy(model3, conf.int = TRUE, conf.level = 0.90) |> 
+  kbl(digits = 2) |> kable_paper()
+```
+
+### Summaries of Model Fit
+
+The R-squared value for `model3` is .443. This is the proportion of the variation in my outcome variable, `poor_mental_health`, that has been accounted for by my regression model. The model has accounted for just over 44% of the variation in the average number of poor mental health days using `food_environment` after adjusting for `state`. This indicates an improvement over projecting the mean for all counties (5.212 poor mental health days).
+
+The residual standard error (sigma) for `model3` is .273 on 322 degrees of freedom. This estimates the standard deviation of the residuals made by the model if my assumptions hold. I expect roughly 95% of my residuals to fall between -2(.27) and +2(.27), or roughly, -.54 to .54. `model3` was fit using 327 counties.
+
+```{r}
+glance(model3) |> select(r.squared:df, df.residual, nobs) |>
+  kbl(digits = c(3, 3, 3, 2, 3, 0, 0, 0)) |> kable_paper()
+
+summary(model3)
+```
+
+## Residual Analysis
+
+I used `ggplot` to create two residual plots displaying: (1) residuals vs fitted values for `model3` and (2) a normal Q-Q plot for `model3`'s 327 residuals. As we move from left to right on the first residual plot, no patterns emerge that would suggest non-linearity or issues with homoscedasticity. The regression residuals generally show similar variance across the levels of my fitted values for `poor_mental_health`. The normal Q-Q plot of the residuals reveals a few values that are a bit high however, the majority of them closely follow a normal distribution. The linearity, equal variance, and normality assumptions appear to hold for `model3`.
+
+`model3`'s prediction for Cuyahoga County, OH, was 5.318 days for `poor_mental_health`. The actual value of `poor_mental_health` for Cuyahoga County was 5.042 days. This is an error of -.28, meaning that, on average, residents of Cuyahoga County reported .28 fewer days of poor mental health than the model predicted. This is an actual difference of about 6.72 hours.
+
+The two counties where `model3` was least successful in predicting `poor_mental_health` are Hamilton County, IN, and Holmes County, OH, with residual errors of -.854 and .925, respectively. For Hamilton County, the model predicted that residents reported almost one full additional day, on average, of poor mental health in the last 30 days than was actually reported (3.95 actual, 4.81 predicted) and for Holmes County, the model predicted that residents reported fewer poor mental health days, on average, than were actually reported (6.02 actual, 5.10 predicted).
+
+```{r}
+model3_aug <- augment(model3, data = chr_2022_A3)
+
+p1<- ggplot(model3_aug, aes(x = .fitted, y = .resid)) +
+  geom_point() + 
+  geom_point(data = model3_aug |> 
+               slice_max(abs(.resid), n = 2),
+             col = "red", size = 2) +
+  geom_text_repel(data = model3_aug |> 
+               slice_max(abs(.resid), n = 2),
+               aes(label = fipscode), col = "red") +
+
+  geom_abline(intercept = 0, slope = 0, lty = "dashed") +
+  geom_smooth(method = "loess", formula = y ~ x, se = F) +
+  labs(title = "Model3: Residuals vs. Fitted Values",
+       caption = "2 largest |residuals| highlighted in red.",
+       x = "Fitted Values from model3", y = "Residuals") 
+
+p2 <- ggplot(model3_aug, aes(sample = .resid)) +
+    geom_qq(col = "black") + 
+    geom_qq_line(col = "blue") +
+    labs(title = "Normal Q-Q: 327 model3 Residuals")
+
+p1+p2
+
+model3_aug |> select(fipscode:.resid) |> 
+  filter(county == "Cuyahoga County") |>
+  kbl(digits = 3) |> kable_paper()
+
+model3_aug |> select(fipscode:.resid) |> 
+  filter(fipscode == 39075| fipscode==18057) |>
+  kbl(digits = 3) |> kable_paper()
+```
+
+## Conclusions and Limitations
+
+In Analysis 3, I was interested in whether a county's food environment index could predict poor mental health for its residents after accounting for differences between states. My analysis included 327 counties in Ohio, Indiana, Michigan, and Pennsylvania. Based on my work in Analysis 1, I concluded that a strong relationship exists between a county's food environment and the mental health of its residents for this particular region of the United States. After adjusting for differences between states, `model3` seems to represent an improvement over `model1` which predicted for `poor_mental_health` by using `food_environment` alone (R-squared value for `model1` was .369 vs. an R-squared value of .443 for `model3`). All of the coefficients in my `model3` prediction equation were judged to be statistically significant with the exception of the coefficient adjusting for counties in Michigan. Therefore, after adjusting for differences between states, the `food_environment` index can exhibit a greater level of predictive value for the mental health of a county's residents than is generated by `food_environment` alone. This was the case for Ohio, Indiana, and Pennsylvania, but not for Michigan.
+
+My limitations with Analysis 3 are similar to those of Analysis 1 in that I'm able to establish that the value of using the `food_environment` index to predict `poor_mental_health` is generally strengthened by adjusting for differences between states but that was not true for every state in my data set. I'm also unable to determine any causal connections. Perhaps this is due to the use of model-based estimates for `poor_mental_health` that were used for some of the smaller counties and/or counties with low response rates. I did not look compare population differences across the four states I included in my data set. As mentioned previously, there are also issues with generalizability because counties in every state experience poor mental health and encounter poverty and barriers to accessing healthy foods in ways that are unique to the culture and geography of that state so further analysis is needed to determine how these relationships look in other regions of the country.
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
